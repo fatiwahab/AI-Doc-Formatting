@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Professional Document Formatter</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root {
             --color-primary: #2c3e50;
@@ -119,6 +119,11 @@
 
         .file-input-label:hover {
             background: #2980b9;
+        }
+
+        .file-input-label.loading {
+            background: #95a5a6;
+            cursor: not-allowed;
         }
 
         .color-schemes {
@@ -298,7 +303,6 @@
 </head>
 <body>
     <div class="container">
-        <!-- Input Panel -->
         <div class="panel">
             <h1>📄 Document Formatter</h1>
             <p style="color: #7f8c8d; font-size: 14px;">Format your text with professional styling. Your content stays exactly as-is.</p>
@@ -307,21 +311,18 @@
                 ✓ No content changes • ✓ Formatting only • ✓ Client-side processing
             </div>
 
-            <!-- Text Input -->
             <div>
                 <div class="section-title">Your Content</div>
                 <textarea id="textInput" placeholder="Paste your text here, or upload a DOCX file below..."></textarea>
             </div>
 
-            <!-- File Upload -->
             <div>
                 <div class="file-input-wrapper">
                     <input type="file" id="docxFile" accept=".docx" />
-                    <label for="docxFile" class="file-input-label">+ Upload DOCX File</label>
+                    <label for="docxFile" class="file-input-label" id="fileLabel">+ Upload DOCX File</label>
                 </div>
             </div>
 
-            <!-- Color Schemes -->
             <div>
                 <div class="section-title">Color Scheme</div>
                 <div class="color-schemes">
@@ -368,14 +369,12 @@
                 </div>
             </div>
 
-            <!-- Action Buttons -->
             <div class="button-group">
                 <button class="btn-secondary" onclick="clearContent()">Clear</button>
                 <button class="btn-primary" onclick="exportPDF()">Export PDF</button>
             </div>
         </div>
 
-        <!-- Preview Panel -->
         <div class="panel">
             <div class="section-title">Live Preview</div>
             <div class="preview-doc" id="preview">
@@ -387,17 +386,14 @@
     <script>
         const textInput = document.getElementById('textInput');
         const docxFile = document.getElementById('docxFile');
+        const fileLabel = document.getElementById('fileLabel');
         const preview = document.getElementById('preview');
         const container = document.querySelector('.container');
         let currentScheme = 'scheme-blue';
 
-        // Update preview on text input
         textInput.addEventListener('input', updatePreview);
-
-        // Handle DOCX file upload
         docxFile.addEventListener('change', handleDocxUpload);
 
-        // Color scheme selection
         document.querySelectorAll('.color-scheme').forEach(scheme => {
             scheme.addEventListener('click', () => {
                 document.querySelectorAll('.color-scheme').forEach(s => s.classList.remove('active'));
@@ -408,7 +404,6 @@
             });
         });
 
-        // Set initial scheme
         container.className = `container ${currentScheme}`;
 
         function updatePreview() {
@@ -418,17 +413,14 @@
                 return;
             }
 
-            // Parse markdown-like formatting in the text
             let formatted = text
                 .split('\n')
                 .map(line => {
-                    // Detect headers (lines starting with # or ##)
                     if (line.match(/^#+\s/)) {
                         const level = line.match(/^#+/)[0].length;
                         const text = line.replace(/^#+\s/, '');
                         return `<h${level}>${escapeHtml(text)}</h${level}>`;
                     }
-                    // Regular paragraphs
                     if (line.trim()) {
                         return `<p>${escapeHtml(line)}</p>`;
                     }
@@ -443,17 +435,52 @@
             const file = e.target.files[0];
             if (!file) return;
 
+            fileLabel.classList.add('loading');
+            fileLabel.textContent = 'Processing...';
+
             const reader = new FileReader();
-            reader.onload = function(event) {
-                const arrayBuffer = event.target.result;
-                mammoth.extractRawText({arrayBuffer: arrayBuffer}).then(result => {
-                    textInput.value = result.value;
-                    updatePreview();
-                }).catch(err => {
-                    alert('Error reading DOCX file: ' + err.message);
-                });
+
+            reader.onerror = function(err) {
+                alert('Error reading file: ' + err.name);
+                resetFileLabel();
             };
+
+            reader.onload = function(event) {
+                try {
+                    const arrayBuffer = event.target.result;
+                    JSZip.loadAsync(arrayBuffer).then(zip => {
+                        return zip.file('word/document.xml').async('string');
+                    }).then(xmlContent => {
+                        const textElements = xmlContent.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+                        const extractedText = textElements
+                            .map(el => el.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
+                            .join('');
+
+                        if (extractedText.trim()) {
+                            textInput.value = extractedText;
+                        } else {
+                            const fallbackText = xmlContent.replace(/<[^>]*>/g, '').trim();
+                            textInput.value = fallbackText || 'No text found in document';
+                        }
+
+                        updatePreview();
+                        resetFileLabel();
+                    }).catch(err => {
+                        alert('Error reading DOCX file. Make sure it\'s a valid .docx file.');
+                        resetFileLabel();
+                    });
+                } catch (err) {
+                    alert('Unexpected error: ' + err.message);
+                    resetFileLabel();
+                }
+            };
+
             reader.readAsArrayBuffer(file);
+        }
+
+        function resetFileLabel() {
+            fileLabel.classList.remove('loading');
+            fileLabel.textContent = '+ Upload DOCX File';
         }
 
         function escapeHtml(text) {
