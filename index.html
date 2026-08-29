@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Professional Document Formatter</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.min.js"></script>
     <style>
         :root {
             --color-primary: #2c3e50;
@@ -303,6 +303,7 @@
 </head>
 <body>
     <div class="container">
+        <!-- Input Panel -->
         <div class="panel">
             <h1>📄 Document Formatter</h1>
             <p style="color: #7f8c8d; font-size: 14px;">Format your text with professional styling. Your content stays exactly as-is.</p>
@@ -311,11 +312,13 @@
                 ✓ No content changes • ✓ Formatting only • ✓ Client-side processing
             </div>
 
+            <!-- Text Input -->
             <div>
                 <div class="section-title">Your Content</div>
                 <textarea id="textInput" placeholder="Paste your text here, or upload a DOCX file below..."></textarea>
             </div>
 
+            <!-- File Upload -->
             <div>
                 <div class="file-input-wrapper">
                     <input type="file" id="docxFile" accept=".docx" />
@@ -323,6 +326,7 @@
                 </div>
             </div>
 
+            <!-- Color Schemes -->
             <div>
                 <div class="section-title">Color Scheme</div>
                 <div class="color-schemes">
@@ -369,12 +373,15 @@
                 </div>
             </div>
 
+            <!-- Action Buttons -->
             <div class="button-group">
                 <button class="btn-secondary" onclick="clearContent()">Clear</button>
-                <button class="btn-primary" onclick="exportPDF()">Export PDF</button>
+                <button class="btn-primary" onclick="exportHTML()">Export HTML</button>
+                <button class="btn-primary" onclick="exportDocx()">Export DOCX</button>
             </div>
         </div>
 
+        <!-- Preview Panel -->
         <div class="panel">
             <div class="section-title">Live Preview</div>
             <div class="preview-doc" id="preview">
@@ -391,9 +398,13 @@
         const container = document.querySelector('.container');
         let currentScheme = 'scheme-blue';
 
+        // Update preview on text input
         textInput.addEventListener('input', updatePreview);
+
+        // Handle DOCX file upload
         docxFile.addEventListener('change', handleDocxUpload);
 
+        // Color scheme selection
         document.querySelectorAll('.color-scheme').forEach(scheme => {
             scheme.addEventListener('click', () => {
                 document.querySelectorAll('.color-scheme').forEach(s => s.classList.remove('active'));
@@ -404,6 +415,7 @@
             });
         });
 
+        // Set initial scheme
         container.className = `container ${currentScheme}`;
 
         function updatePreview() {
@@ -413,14 +425,17 @@
                 return;
             }
 
+            // Parse markdown-like formatting in the text
             let formatted = text
                 .split('\n')
                 .map(line => {
+                    // Detect headers (lines starting with # or ##)
                     if (line.match(/^#+\s/)) {
                         const level = line.match(/^#+/)[0].length;
                         const text = line.replace(/^#+\s/, '');
                         return `<h${level}>${escapeHtml(text)}</h${level}>`;
                     }
+                    // Regular paragraphs
                     if (line.trim()) {
                         return `<p>${escapeHtml(line)}</p>`;
                     }
@@ -435,12 +450,15 @@
             const file = e.target.files[0];
             if (!file) return;
 
+            console.log('File selected:', file.name, file.size, 'bytes');
+
             fileLabel.classList.add('loading');
             fileLabel.textContent = 'Processing...';
 
             const reader = new FileReader();
 
             reader.onerror = function(err) {
+                console.error('FileReader error:', err);
                 alert('Error reading file: ' + err.name);
                 resetFileLabel();
             };
@@ -448,17 +466,25 @@
             reader.onload = function(event) {
                 try {
                     const arrayBuffer = event.target.result;
+                    console.log('File loaded, extracting text from DOCX...');
+
+                    // Use JSZip to read the DOCX file (which is a ZIP archive)
                     JSZip.loadAsync(arrayBuffer).then(zip => {
+                        // DOCX files contain text in document.xml
                         return zip.file('word/document.xml').async('string');
                     }).then(xmlContent => {
+                        // Extract text from XML - DOCX text is in <w:t> tags
                         const textElements = xmlContent.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
                         const extractedText = textElements
                             .map(el => el.replace(/<w:t[^>]*>|<\/w:t>/g, ''))
                             .join('');
 
+                        console.log('Text extracted successfully, length:', extractedText.length);
+
                         if (extractedText.trim()) {
                             textInput.value = extractedText;
                         } else {
+                            // Fallback: extract all text content if no w:t tags found
                             const fallbackText = xmlContent.replace(/<[^>]*>/g, '').trim();
                             textInput.value = fallbackText || 'No text found in document';
                         }
@@ -466,15 +492,18 @@
                         updatePreview();
                         resetFileLabel();
                     }).catch(err => {
-                        alert('Error reading DOCX file. Make sure it\'s a valid .docx file.');
+                        console.error('Error extracting DOCX:', err);
+                        alert('Error reading DOCX file. Make sure it\'s a valid .docx file.\n\nError: ' + (err.message || err));
                         resetFileLabel();
                     });
                 } catch (err) {
+                    console.error('Unexpected error during extraction:', err);
                     alert('Unexpected error: ' + err.message);
                     resetFileLabel();
                 }
             };
 
+            console.log('Starting to read file as ArrayBuffer...');
             reader.readAsArrayBuffer(file);
         }
 
@@ -497,22 +526,99 @@
             }
         }
 
-        function exportPDF() {
+        function exportHTML() {
             if (!textInput.value.trim()) {
                 alert('Please enter some content first.');
                 return;
             }
 
-            const element = document.getElementById('preview');
-            const opt = {
-                margin: 15,
-                filename: 'formatted-document.pdf',
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2 },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+            const previewContent = document.getElementById('preview').innerHTML;
+            const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Formatted Document</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 40px;
+            line-height: 1.8;
+            color: #2c3e50;
+        }
+        h1 { font-size: 32px; margin-bottom: 10px; color: #2c3e50; }
+        h2 { font-size: 20px; margin-top: 25px; margin-bottom: 12px; color: #3498db; border-bottom: 2px solid #3498db; padding-bottom: 8px; }
+        h3 { font-size: 16px; margin-top: 18px; margin-bottom: 10px; }
+        p { margin-bottom: 12px; }
+        ul, ol { margin-left: 24px; margin-bottom: 12px; }
+        li { margin-bottom: 6px; }
+    </style>
+</head>
+<body>
+${previewContent}
+</body>
+</html>`;
 
-            html2pdf().set(opt).from(element).save();
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'formatted-document.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportDocx() {
+            if (!textInput.value.trim()) {
+                alert('Please enter some content first.');
+                return;
+            }
+
+            try {
+                const { Document, Packer, Paragraph, TextRun, HeadingLevel } = window.docx;
+                const paragraphs = [];
+                const lines = textInput.value.split('\n');
+
+                lines.forEach(line => {
+                    if (line.match(/^#+\s/)) {
+                        const level = line.match(/^#+/)[0].length;
+                        const text = line.replace(/^#+\s/, '');
+                        paragraphs.push(
+                            new Paragraph({
+                                text: text,
+                                heading: HeadingLevel[`HEADING_${level}`],
+                                spacing: { after: 200 }
+                            })
+                        );
+                    } else if (line.trim()) {
+                        paragraphs.push(
+                            new Paragraph({
+                                text: line,
+                                spacing: { after: 200 }
+                            })
+                        );
+                    }
+                });
+
+                const doc = new Document({ sections: [{ children: paragraphs }] });
+
+                Packer.toBlob(doc).then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'formatted-document.docx';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                });
+            } catch (err) {
+                alert('Error exporting DOCX. Try Export HTML instead.\n\nError: ' + err.message);
+            }
         }
     </script>
 </body>
